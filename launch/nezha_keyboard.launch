@@ -1,0 +1,8 @@
+<launch>
+    <param name="use_sim_time" value="false"/>
+    <!-- 启动键盘遥控命令截留节点 -->
+    <node name="stanley_controller_node" pkg="stanley_controller_node" type="stanley_controller_node.py" output="screen" respawn="false"/>
+    <!-- 启动键盘遥控节点 -->
+    <node name="twist_keyboard_nezha" pkg="twist_keyboard_nezha" type="twist_keyboard_nezha.py" output="screen" respawn="false"/>
+
+</launch>
