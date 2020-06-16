@@ -18,7 +18,7 @@
 #include "nezha_base/sender/tf_broadcaster.h"
 #include "nezha_base/serial/handle_port.h"
 #include "nezha_base/sender/sonar_publisher.h"
-#include "servo_node/ServoMsg.h"
+#include "nezha_base/msg/ServoMsg.h"
 
 namespace base {
 
@@ -43,7 +43,7 @@ class SerialInterface
         //void checkSum(uint8_t* data, size_t len, uint8_t& dest);
         void cmdVelCallback(const geometry_msgs::Twist & twist);
         void imu_callback(const sensor_msgs::Imu::ConstPtr& msg);
-
+        void servo_msg_callback(const servo_node::ServoMsg& msg);
 
         void timeEventCallback(const ros::TimerEvent&);
         void dynamic_reconfig_callback(nezha_base::pid_configConfig &config);
@@ -114,6 +114,7 @@ class SerialInterface
         int m_rightTicksSet;
         unsigned char m_bufLeftSend[15];
         unsigned char m_bufRightSend[15];
+        unsigned char m_bufSteeringAngleSend[15];
         uint8_t m_bufLeftGet[15];
         uint8_t m_bufRightGet[15];
         bool LEFT_GET,RIGHT_GET;

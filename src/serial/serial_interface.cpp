@@ -40,8 +40,8 @@ void SerialInterface::loop()
     nh_p.param<double>("max_linear_speed",m_encoderData.max_linear_speed_,0.5);
     nh_p.param<int>("control_rate",m_controlRate,100);
     nh_p.param<double>("linear_correction_factor",m_encoderData.linear_correction_factor_,1.0);
-    nh_p.param<double>("max_steering_angle",m_encoderData.max_steering_angle,28);
-    nh_p.param<double>("servo_bias",m_encoderData.servo_bias_,1500);
+    nh_p.param<double>("max_steering_angle",m_encoderData.max_steering_angle,15);
+    nh_p.param<double>("servo_bias",m_encoderData.servo_bias_,1900);
     nh_p.param<double>("steering_offset_factor",m_encoderData.steering_offset_factor,1.0);
 
     m_encoderData.max_linear_speed_= (m_encoderData.max_linear_speed_ > 2.0)? 2.0 : m_encoderData.max_linear_speed_;
@@ -70,7 +70,7 @@ void SerialInterface::loop()
     m_tfBroadcasePtr = std::make_shared<TfBroadCaster>(odom_frame_,base_frame_);
     m_cmdSub = nh.subscribe("/cmd_vel",10,&SerialInterface::cmdVelCallback,this);
     m_imuCalibSub= nh.subscribe("/corrected",10,&SerialInterface::imu_callback,this);
-	m_servoMsgSub = nh.subscribe("/servo_msg",10,&SerialInterface::servo_msg_callback,this);
+    m_servoMsgSub = nh.subscribe("/servo_msg",10,&SerialInterface::servo_msg_callback,this);
 
     m_sendVelBack = nh.createTimer(ros::Duration(1.0/m_controlRate),&SerialInterface::timeEventCallback,this);
 
@@ -183,16 +183,14 @@ bool SerialInterface::initPort(Serial_ptr &serialPtr,std::string portName,
     boost::asio::write(*serialPtr.get(),boost::asio::buffer(data,11),errorCode);
 
 
-    uint8_t steering_angle[7];
-    steering_angle[0] = HEAD_BYTE1;
-    steering_angle[1] = HEAD_BYTE2;
-    steering_angle[2] = 0x07;
-    steering_angle[3] = SEND_STEER;
-    steering_angle[4] = ((short)m_encoderData.set_servo_steering_angle>>8) & 0xff;
-    steering_angle[5] = (short)m_encoderData.set_servo_steering_angle & 0xff;
-    HandlePort::checkSum(steering_angle,6,steering_angle[6]);
-
-    boost::asio::write(*serialPtr.get(),boost::asio::buffer(steering_angle,7),errorCode);
+    m_bufSteeringAngleSend[0] = HEAD_BYTE1;
+    m_bufSteeringAngleSend[1] = HEAD_BYTE2;
+    m_bufSteeringAngleSend[2] = 0x07;
+    m_bufSteeringAngleSend[3] = SEND_STEER;
+    m_bufSteeringAngleSend[4] = ((short)m_encoderData.set_servo_steering_angle>>8) & 0xff;
+    m_bufSteeringAngleSend[5] = (short)m_encoderData.set_servo_steering_angle & 0xff;
+    HandlePort::checkSum(m_bufSteeringAngleSend,6,m_bufSteeringAngleSend[6]);
+    boost::asio::write(*serialPtr.get(),boost::asio::buffer(m_bufSteeringAngleSend,7),errorCode);
     return true;
    
 }
@@ -213,7 +211,7 @@ void SerialInterface::dynamic_reconfig_callback(nezha_base::pid_configConfig &co
     pid_set[8] = (config.Kd >> 8) & 0xff;
     pid_set[9] = config.Kd & 0xff;
 
-    m_encoderData.servo_bias_ = config.ServoBias;    // 3500  3800  4100
+    m_encoderData.servo_bias_ = config.ServoBias;    // 1500  1900  2300    0 4000
     m_encoderData.max_steering_angle = config.MaxSteeringAngle/180*M_PI;   
     m_encoderData.steering_offset_factor = config.SteeringOffsetFactor;
 
@@ -253,25 +251,37 @@ void SerialInterface::imu_callback(const sensor_msgs::Imu::ConstPtr& msg)
     m_imuCalibData=*msg;
 }
 
-void SerialInterface::servo_msg_callback(constservo_node::ServoMsg& msg)
+
+void SerialInterface::servo_msg_callback(const servo_node::ServoMsg& msg)
 {
-    servo_node::ServoMsg  servo_msg=msg
-    servo_msg.ID
-	servo_msg.position
-	servo_msg.TIME
-    uint8_t buf_set[11];
+    servo_node::ServoMsg  servo_msg=msg;
+    uint8_t buf_set[10];
     buf_set[0] = HEAD_BYTE1;
     buf_set[1] = HEAD_BYTE2;
-    buf_set[2] = 0x0b;
+    buf_set[2] = 0x0A;
     buf_set[3] = SERVMSG;
-    buf_set[4] = (servo_msg.ID >> 24) & 0xff;
-    buf_set[5] = (servo_msg.ID >> 16) & 0xff;
-    buf_set[6] = (servo_msg.position >> 8) & 0xff;
-    buf_set[7] = servo_msg.position & 0xff;
-    buf_set[6] = (servo_msg.TIME >> 8) & 0xff;
-    buf_set[7] = servo_msg.TIME & 0xff;
-    HandlePort::checkSum(m_bufLeftSend,8,m_bufLeftSend[8]);
-    boost::asio::write(*m_serialLeftPtr.get(),boost::asio::buffer(m_bufLeftSend,15),m_errorCodeLeft);
+    buf_set[4] = (servo_msg.ID) & 0xff;
+    buf_set[5] = (servo_msg.position >> 8) & 0xff;
+    buf_set[6] = servo_msg.position & 0xff;
+    buf_set[7] = (servo_msg.TIME >> 8) & 0xff;
+    buf_set[8] = servo_msg.TIME & 0xff;
+    HandlePort::checkSum(buf_set,9,buf_set[9]);
+    std::cout << "servo_msg.ID =" << servo_msg.ID << std::endl;
+    std::cout << "servo_msg.position =" << servo_msg.position << std::endl;
+    std::cout << "servo_msg.TIME =" << servo_msg.TIME << std::endl;
+    
+    if(servo_msg.ID <= 20){
+         boost::asio::write(*m_serialPtr.get(),boost::asio::buffer(buf_set,10),m_errorCode);
+    }
+	else if(servo_msg.ID <= 26)
+    {
+         boost::asio::write(*m_serialLeftPtr.get(),boost::asio::buffer(buf_set,10),m_errorCodeLeft);
+    }
+
+	else if(servo_msg.ID <= 32)
+    {
+        boost::asio::write(*m_serialRigthPtr.get(),boost::asio::buffer(buf_set,10),m_errorCodeRight);
+    }
 }
 
 
@@ -321,24 +331,24 @@ void SerialInterface::timeEventCallback(const ros::TimerEvent&)
     // 单位电机：转/分钟
     _leftSpeed=leftSpeed*60*m_encoderData.gear_reduction_/(M_PI*m_encoderData.wheel_diameter_);// 单位电机：转/分钟
     _rightSpeed=-rightSpeed*60*m_encoderData.gear_reduction_/(M_PI*m_encoderData.wheel_diameter_); 
-
     m_leftTicksSet=round(_leftSpeed);
     m_rightTicksSet=round(_rightSpeed);
     m_lrTicksSetPubPtr->Publish(m_leftTicksSet,m_rightTicksSet);
-    LETF_SEND=1;
-    RTGHT_SEND=1; 
-    uint8_t steering_angle[7];
-    steering_angle[0] = HEAD_BYTE1;
-    steering_angle[1] = HEAD_BYTE2;
-    steering_angle[2] = 0x07;
-    steering_angle[3] = SEND_STEER;
-    steering_angle[4] = ((short)m_encoderData.set_servo_steering_angle>>8) & 0xff;
-    steering_angle[5] = (short)m_encoderData.set_servo_steering_angle & 0xff;
-    HandlePort::checkSum(steering_angle,6,steering_angle[6]);
+    
+    m_bufSteeringAngleSend[0] = HEAD_BYTE1;
+    m_bufSteeringAngleSend[1] = HEAD_BYTE2;
+    m_bufSteeringAngleSend[2] = 0x07;
+    m_bufSteeringAngleSend[3] = SEND_STEER;
+    m_bufSteeringAngleSend[4] = ((short)m_encoderData.set_servo_steering_angle>>8) & 0xff;
+    m_bufSteeringAngleSend[5] = (short)m_encoderData.set_servo_steering_angle & 0xff;
+    HandlePort::checkSum(m_bufSteeringAngleSend,6,m_bufSteeringAngleSend[6]);
     try {
-    boost::asio::write(*m_serialPtr.get(),boost::asio::buffer(steering_angle,7),m_errorCode);
+    boost::asio::write(*m_serialPtr.get(),boost::asio::buffer(m_bufSteeringAngleSend,7),m_errorCode);
     }
     catch (boost::system::system_error &e)  {}
+    //printf("\n SET servo_steering_angle = %d: \n",(short)m_encoderData.set_servo_steering_angle);
+    LETF_SEND=1;
+    RTGHT_SEND=1; 
  }
 
 void SerialInterface::sendLeftSpeed()
@@ -349,6 +359,10 @@ void SerialInterface::sendLeftSpeed()
      {
         try{
         m_mutexLeft.lock();
+
+        boost::asio::write(*m_serialLeftPtr.get(),boost::asio::buffer(m_bufSteeringAngleSend,7),m_errorCodeLeft);
+
+
         LETF_SEND=0;
         m_bufLeftSend[0] = HEAD_BYTE1;
         m_bufLeftSend[1] = HEAD_BYTE2;
@@ -378,6 +392,8 @@ void SerialInterface::sendRightSpeed()
         try{
         m_mutexRight.lock();
         RTGHT_SEND=0;
+        boost::asio::write(*m_serialRigthPtr.get(),boost::asio::buffer(m_bufSteeringAngleSend,7),m_errorCodeRight);
+
         m_bufRightSend[0] = HEAD_BYTE1;
         m_bufRightSend[1] = HEAD_BYTE2;
         m_bufRightSend[2] = 0x09;
@@ -429,10 +445,10 @@ double SerialInterface::steer(double steer_angle)
     double max_steering_angle_= m_encoderData.max_steering_angle;
     steer_angle = constrain(steer_angle,-max_steering_angle_,max_steering_angle_);                                                                    // (180/M_PI)*11.111111=636.62031 
     m_encoderData.set_servo_steering_angle = m_encoderData.servo_bias_-mapDouble(steer_angle,-max_steering_angle_,max_steering_angle_,-max_steering_angle_,max_steering_angle_)*636.62031 ;
-    if(m_encoderData.set_servo_steering_angle > 2500)
-        m_encoderData.set_servo_steering_angle=2500;
-    if(m_encoderData.set_servo_steering_angle < 500)
-        m_encoderData.set_servo_steering_angle=500;
+    if(m_encoderData.set_servo_steering_angle > 2300)
+        m_encoderData.set_servo_steering_angle=2300;
+    if(m_encoderData.set_servo_steering_angle < 1500)
+        m_encoderData.set_servo_steering_angle=1500;
     return steer_angle;
 }
 
@@ -511,21 +527,25 @@ void SerialInterface::parsingData(uint8_t port_msgType, uint8_t* _buffer,int por
     switch (port_msgType)
     {
         case MSG_BATTERY:
+            //ROS_INFO("receive MSG_BATTERY !");
             m_handlePortptr->handleBatteryData(_buffer);
             m_battertPubPtr->Publish(m_handlePortptr->m_batteryMsg.data);
            break;
         case MSG_IMU:
+            // ROS_INFO("receive MSG_IMU !");
              m_handlePortptr->handleImuData(_buffer,m_imuCalibData);
              m_imuPubPtr->doPublish(m_handlePortptr->m_imuMsg,m_handlePortptr->m_magMsg,ros::Time::now());
             break;
         case MSG_ULTROSOUND:
+            // ROS_INFO("receive MSG_ULTROSOUND !");
              m_handlePortptr->handleSonarData(_buffer,port_id);
              m_sonarPubPtr->doPublish(m_handlePortptr->m_sonarVector,port_id);
              break;
 
         case MSG_WHEEL_COUNT:
             if(port_id==1)
-            {
+            {   
+               // ROS_INFO("receive LEFT MSG_WHEEL_COUNT !");
                 getCopy(_buffer,m_bufLeftGet,14);
                 LEFT_GET=1;
                 boost::mutex::scoped_lock scoped_lock(m_mutexSend);
@@ -545,6 +565,7 @@ void SerialInterface::parsingData(uint8_t port_msgType, uint8_t* _buffer,int por
             }
             if(port_id==2)
             {
+               // ROS_INFO("receive RIGHT MSG_WHEEL_COUNT !");
                 getCopy(_buffer,m_bufRightGet,14);
                 boost::mutex::scoped_lock scoped_lock(m_mutexSend);
                 {  RIGHT_GET=1;  }
